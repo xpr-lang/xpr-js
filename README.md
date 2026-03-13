@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/xpr-lang/xpr-js/actions/workflows/ci.yml/badge.svg)](https://github.com/xpr-lang/xpr-js/actions)
 [![npm](https://img.shields.io/npm/v/@xpr-lang/xpr)](https://www.npmjs.com/package/@xpr-lang/xpr)
+[![XPR spec](https://img.shields.io/badge/XPR_spec-v0.2-blue)](https://github.com/xpr-lang/xpr)
+[![conformance](https://img.shields.io/badge/conformance-100%25-brightgreen)](https://github.com/xpr-lang/xpr/tree/main/conformance)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **XPR** is a sandboxed cross-language expression language for data pipeline transforms. This is the TypeScript/JavaScript reference runtime.
