@@ -10,6 +10,10 @@ export enum TokenType {
   TemplateMiddle = "TemplateMiddle",
   TemplateTail = "TemplateTail",
   Identifier = "Identifier",
+  Let = "Let",
+  Semicolon = "Semicolon",
+  DotDotDot = "DotDotDot",
+  Equal = "Equal",
   Plus = "Plus",
   Minus = "Minus",
   Star = "Star",
@@ -204,9 +208,11 @@ export function tokenize(input: string): Token[] {
       while (pos < input.length && /[a-zA-Z0-9_]/.test(peek())) id += advance();
       if (id === "true" || id === "false") return tok(TokenType.Boolean, id, start);
       if (id === "null") return tok(TokenType.Null, id, start);
+      if (id === "let") return tok(TokenType.Let, id, start);
       return tok(TokenType.Identifier, id, start);
     }
 
+    if (ch === "." && peek(1) === "." && peek(2) === ".") { advance(); advance(); advance(); return tok(TokenType.DotDotDot, "...", start); }
     if (ch === "*" && peek(1) === "*") { advance(); advance(); return tok(TokenType.StarStar, "**", start); }
     if (ch === "=" && peek(1) === "=") { advance(); advance(); return tok(TokenType.EqualEqual, "==", start); }
     if (ch === "!" && peek(1) === "=") { advance(); advance(); return tok(TokenType.BangEqual, "!=", start); }
@@ -218,6 +224,7 @@ export function tokenize(input: string): Token[] {
     if (ch === "?" && peek(1) === ".") { advance(); advance(); return tok(TokenType.QuestionDot, "?.", start); }
     if (ch === "|" && peek(1) === ">") { advance(); advance(); return tok(TokenType.PipeGreater, "|>", start); }
     if (ch === "=" && peek(1) === ">") { advance(); advance(); return tok(TokenType.Arrow, "=>", start); }
+    if (ch === "=") { advance(); return tok(TokenType.Equal, "=", start); }
 
     advance();
     switch (ch) {
@@ -239,6 +246,7 @@ export function tokenize(input: string): Token[] {
       case "]": return tok(TokenType.RightBracket, "]", start);
       case "{": return tok(TokenType.LeftBrace, "{", start);
       case "}": return tok(TokenType.RightBrace, "}", start);
+      case ";": return tok(TokenType.Semicolon, ";", start);
       default:
         throw new XprError(`Unexpected character '${ch}' at position ${start}`, start);
     }

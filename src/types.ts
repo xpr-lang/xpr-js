@@ -7,7 +7,7 @@ export interface StringLiteral { type: "StringLiteral"; value: string; position:
 export interface BooleanLiteral { type: "BooleanLiteral"; value: boolean; position: Position }
 export interface NullLiteral { type: "NullLiteral"; position: Position }
 export interface ArrayExpression { type: "ArrayExpression"; elements: Expression[]; position: Position }
-export interface ObjectExpression { type: "ObjectExpression"; properties: Property[]; position: Position }
+export interface ObjectExpression { type: "ObjectExpression"; properties: (Property | SpreadProperty)[]; position: Position }
 
 // ── Access (2) ────────────────────────────────
 export interface Identifier { type: "Identifier"; name: string; position: Position }
@@ -88,7 +88,16 @@ export interface PipeExpression {
   position: Position;
 }
 
-// ── Spread (1) — defined but NOT used in v0.1 ─
+// ── Bindings (1) ──────────────────────────────
+export interface LetExpression {
+  type: "LetExpression";
+  name: string;
+  value: Expression;
+  body: Expression;
+  position: Position;
+}
+
+// ── Spread (1) ────────────────────────────────
 export interface SpreadElement {
   type: "SpreadElement";
   argument: Expression;
@@ -97,8 +106,15 @@ export interface SpreadElement {
 
 // ── Helper types ──────────────────────────────
 export interface Property {
+  type?: never;
   key: string;
   value: Expression;
+  position: Position;
+}
+
+export interface SpreadProperty {
+  type: "SpreadProperty";
+  argument: Expression;
   position: Position;
 }
 
@@ -120,4 +136,5 @@ export type Expression =
   | CallExpression
   | TemplateLiteral
   | PipeExpression
-  | SpreadElement;
+  | SpreadElement
+  | LetExpression;

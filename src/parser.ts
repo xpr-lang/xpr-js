@@ -5,7 +5,7 @@ import type {
   ArrayExpression, ObjectExpression, Identifier, MemberExpression,
   BinaryExpression, BinaryOp, LogicalExpression, LogicalOp, UnaryExpression, UnaryOp,
   ConditionalExpression, ArrowFunction, CallExpression, TemplateLiteral,
-  PipeExpression, Property,
+  PipeExpression, Property, SpreadProperty, LetExpression,
 } from "./types.js";
 
 const BP_PIPE = 10;
@@ -141,10 +141,33 @@ class Parser {
         return first;
       }
 
+      case TokenType.Let: {
+        const nameTok = this.expect(TokenType.Identifier);
+        this.expect(TokenType.Equal);
+        const value = this.expression(0);
+        const semi = this.peek();
+        if (semi.type !== TokenType.Semicolon) {
+          throw new XprError(`Expected ';' after let binding value at position ${semi.position}`, semi.position);
+        }
+        this.advance();
+        if (this.peek().type === TokenType.EOF) {
+          throw new XprError(`Expected expression after ';' in let binding`, semi.position);
+        }
+        const body = this.expression(0);
+        return { type: "LetExpression", name: nameTok.value, value, body, position: pos } as LetExpression;
+      }
+
       case TokenType.LeftBracket: {
         const elements: Expression[] = [];
         while (this.peek().type !== TokenType.RightBracket && this.peek().type !== TokenType.EOF) {
-          elements.push(this.expression(0));
+          if (this.peek().type === TokenType.DotDotDot) {
+            const spreadPos = this.peek().position;
+            this.advance();
+            const arg = this.expression(0);
+            elements.push({ type: "SpreadElement", argument: arg, position: spreadPos });
+          } else {
+            elements.push(this.expression(0));
+          }
           if (this.peek().type === TokenType.Comma) this.advance();
           else break;
         }
@@ -153,20 +176,27 @@ class Parser {
       }
 
       case TokenType.LeftBrace: {
-        const properties: Property[] = [];
+        const properties: (Property | SpreadProperty)[] = [];
         while (this.peek().type !== TokenType.RightBrace && this.peek().type !== TokenType.EOF) {
-          const keyTok = this.peek();
-          let key: string;
-          if (keyTok.type === TokenType.Identifier) {
-            key = this.advance().value;
-          } else if (keyTok.type === TokenType.String) {
-            key = this.advance().value;
+          if (this.peek().type === TokenType.DotDotDot) {
+            const spreadPos = this.peek().position;
+            this.advance();
+            const arg = this.expression(0);
+            properties.push({ type: "SpreadProperty", argument: arg, position: spreadPos } as SpreadProperty);
           } else {
-            throw new XprError(`Expected object key at position ${keyTok.position}`, keyTok.position);
+            const keyTok = this.peek();
+            let key: string;
+            if (keyTok.type === TokenType.Identifier) {
+              key = this.advance().value;
+            } else if (keyTok.type === TokenType.String) {
+              key = this.advance().value;
+            } else {
+              throw new XprError(`Expected object key at position ${keyTok.position}`, keyTok.position);
+            }
+            this.expect(TokenType.Colon);
+            const value = this.expression(0);
+            properties.push({ key, value, position: keyTok.position });
           }
-          this.expect(TokenType.Colon);
-          const value = this.expression(0);
-          properties.push({ key, value, position: keyTok.position });
           if (this.peek().type === TokenType.Comma) this.advance();
           else break;
         }

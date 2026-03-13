@@ -81,6 +81,45 @@ export function callStringMethod(obj: XprValue, method: string, args: XprValue[]
       if (args.length === 2 && typeof args[1] !== "number") throw new XprError(`Type error: slice expects number argument`, pos);
       return args.length === 2 ? s.slice(args[0] as number, args[1] as number) : s.slice(args[0] as number);
     }
+    case "indexOf": {
+      if (args.length !== 1) throw new XprError(`Wrong number of arguments for 'indexOf': expected 1, got ${args.length}`, pos);
+      if (typeof args[0] !== "string") throw new XprError(`Type error: indexOf expects string argument`, pos);
+      return s.indexOf(args[0] as string);
+    }
+    case "repeat": {
+      if (args.length !== 1) throw new XprError(`Wrong number of arguments for 'repeat': expected 1, got ${args.length}`, pos);
+      if (typeof args[0] !== "number" || !Number.isInteger(args[0]) || (args[0] as number) < 0) {
+        throw new XprError(`Type error: repeat expects non-negative integer`, pos);
+      }
+      return s.repeat(args[0] as number);
+    }
+    case "trimStart": {
+      if (args.length !== 0) throw new XprError(`Wrong number of arguments for 'trimStart': expected 0, got ${args.length}`, pos);
+      return s.trimStart();
+    }
+    case "trimEnd": {
+      if (args.length !== 0) throw new XprError(`Wrong number of arguments for 'trimEnd': expected 0, got ${args.length}`, pos);
+      return s.trimEnd();
+    }
+    case "charAt": {
+      if (args.length !== 1) throw new XprError(`Wrong number of arguments for 'charAt': expected 1, got ${args.length}`, pos);
+      if (typeof args[0] !== "number") throw new XprError(`Type error: charAt expects number argument`, pos);
+      return s.charAt(args[0] as number);
+    }
+    case "padStart": {
+      if (args.length < 1 || args.length > 2) throw new XprError(`Wrong number of arguments for 'padStart': expected 1-2, got ${args.length}`, pos);
+      if (typeof args[0] !== "number") throw new XprError(`Type error: padStart expects number argument`, pos);
+      const padChar = args.length === 2 ? (args[1] as string) : " ";
+      if (typeof padChar !== "string") throw new XprError(`Type error: padStart pad character must be string`, pos);
+      return s.padStart(args[0] as number, padChar);
+    }
+    case "padEnd": {
+      if (args.length < 1 || args.length > 2) throw new XprError(`Wrong number of arguments for 'padEnd': expected 1-2, got ${args.length}`, pos);
+      if (typeof args[0] !== "number") throw new XprError(`Type error: padEnd expects number argument`, pos);
+      const padChar = args.length === 2 ? (args[1] as string) : " ";
+      if (typeof padChar !== "string") throw new XprError(`Type error: padEnd pad character must be string`, pos);
+      return s.padEnd(args[0] as number, padChar);
+    }
     default:
       throw new XprError(`Type error: cannot call method '${method}' on string`, pos);
   }
@@ -141,6 +180,82 @@ export function callArrayMethod(obj: XprValue, method: string, args: XprValue[],
       if (args.length !== 0) throw new XprError(`Wrong number of arguments for 'reverse': expected 0, got ${args.length}`, pos);
       return [...arr].reverse();
     }
+    case "includes": {
+      if (args.length !== 1) throw new XprError(`Wrong number of arguments for 'includes': expected 1, got ${args.length}`, pos);
+      return arr.some(el => el === args[0]);
+    }
+    case "indexOf": {
+      if (args.length !== 1) throw new XprError(`Wrong number of arguments for 'indexOf': expected 1, got ${args.length}`, pos);
+      const idx = arr.findIndex(el => el === args[0]);
+      return idx;
+    }
+    case "slice": {
+      if (args.length < 1 || args.length > 2) throw new XprError(`Wrong number of arguments for 'slice': expected 1-2, got ${args.length}`, pos);
+      if (typeof args[0] !== "number") throw new XprError(`Type error: slice expects number argument`, pos);
+      if (args.length === 2 && typeof args[1] !== "number") throw new XprError(`Type error: slice expects number argument`, pos);
+      return args.length === 2 ? arr.slice(args[0] as number, args[1] as number) : arr.slice(args[0] as number);
+    }
+    case "join": {
+      if (args.length !== 1) throw new XprError(`Wrong number of arguments for 'join': expected 1, got ${args.length}`, pos);
+      if (typeof args[0] !== "string") throw new XprError(`Type error: join expects string argument`, pos);
+      return arr.map(el => el === null ? "null" : String(el)).join(args[0] as string);
+    }
+    case "concat": {
+      if (args.length !== 1) throw new XprError(`Wrong number of arguments for 'concat': expected 1, got ${args.length}`, pos);
+      if (!Array.isArray(args[0])) throw new XprError(`Type error: concat expects array argument`, pos);
+      return [...arr, ...(args[0] as XprValue[])];
+    }
+    case "flat": {
+      if (args.length !== 0) throw new XprError(`Wrong number of arguments for 'flat': expected 0, got ${args.length}`, pos);
+      const result: XprValue[] = [];
+      for (const el of arr) {
+        if (Array.isArray(el)) result.push(...el);
+        else result.push(el);
+      }
+      return result;
+    }
+    case "unique": {
+      if (args.length !== 0) throw new XprError(`Wrong number of arguments for 'unique': expected 0, got ${args.length}`, pos);
+      const seen: XprValue[] = [];
+      return arr.filter(el => {
+        if (seen.includes(el)) return false;
+        seen.push(el);
+        return true;
+      });
+    }
+    case "zip": {
+      if (args.length !== 1) throw new XprError(`Wrong number of arguments for 'zip': expected 1, got ${args.length}`, pos);
+      if (!Array.isArray(args[0])) throw new XprError(`Type error: zip expects array argument`, pos);
+      const other = args[0] as XprValue[];
+      const len = Math.min(arr.length, other.length);
+      return Array.from({ length: len }, (_, i) => [arr[i], other[i]]);
+    }
+    case "chunk": {
+      if (args.length !== 1) throw new XprError(`Wrong number of arguments for 'chunk': expected 1, got ${args.length}`, pos);
+      if (typeof args[0] !== "number" || !Number.isInteger(args[0]) || (args[0] as number) <= 0) {
+        throw new XprError(`Type error: chunk size must be a positive integer`, pos);
+      }
+      const size = args[0] as number;
+      const chunks: XprValue[][] = [];
+      for (let i = 0; i < arr.length; i += size) {
+        chunks.push(arr.slice(i, i + size));
+      }
+      return chunks;
+    }
+    case "groupBy": {
+      if (args.length !== 1 || typeof args[0] !== "function") throw new XprError(`Wrong number of arguments for 'groupBy': expected 1 function, got ${args.length}`, pos);
+      const groups: Record<string, XprValue[]> = {};
+      for (const el of arr) {
+        const key = String((args[0] as XprFn)(el));
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(el);
+      }
+      const sorted: Record<string, XprValue[]> = {};
+      for (const k of Object.keys(groups).sort()) {
+        sorted[k] = groups[k];
+      }
+      return sorted;
+    }
     default:
       throw new XprError(`Type error: cannot call method '${method}' on array`, pos);
   }
@@ -156,6 +271,15 @@ export function callObjectMethod(obj: XprValue, method: string, args: XprValue[]
     case "values": {
       if (args.length !== 0) throw new XprError(`Wrong number of arguments for 'values': expected 0, got ${args.length}`, pos);
       return Object.values(o);
+    }
+    case "entries": {
+      if (args.length !== 0) throw new XprError(`Wrong number of arguments for 'entries': expected 0, got ${args.length}`, pos);
+      return Object.entries(o).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+    }
+    case "has": {
+      if (args.length !== 1) throw new XprError(`Wrong number of arguments for 'has': expected 1, got ${args.length}`, pos);
+      if (typeof args[0] !== "string") throw new XprError(`Type error: has expects string argument`, pos);
+      return Object.prototype.hasOwnProperty.call(o, args[0] as string);
     }
     default:
       throw new XprError(`Type error: cannot call method '${method}' on object`, pos);
@@ -214,4 +338,30 @@ export const GLOBAL_FUNCTIONS: Record<string, XprFn> = {
     return JSON.stringify(v);
   },
   bool: (v) => isTruthy(v),
+  range: (...args: XprValue[]) => {
+    let start: number, end: number, step: number;
+    if (args.length === 1) {
+      start = 0; end = args[0] as number; step = 1;
+    } else if (args.length === 2) {
+      start = args[0] as number; end = args[1] as number; step = 1;
+    } else if (args.length === 3) {
+      start = args[0] as number; end = args[1] as number; step = args[2] as number;
+    } else {
+      throw new XprError(`Wrong number of arguments for 'range': expected 1-3, got ${args.length}`);
+    }
+    if (typeof start !== "number" || typeof end !== "number" || typeof step !== "number") {
+      throw new XprError(`Type error: range expects number arguments`);
+    }
+    if (!Number.isInteger(step)) {
+      throw new XprError(`Type error: range step must be an integer, got float`);
+    }
+    if (step === 0) throw new XprError(`Type error: range step cannot be zero`);
+    const result: number[] = [];
+    if (step > 0) {
+      for (let i = start; i < end; i += step) result.push(i);
+    } else {
+      for (let i = start; i > end; i += step) result.push(i);
+    }
+    return result;
+  },
 };

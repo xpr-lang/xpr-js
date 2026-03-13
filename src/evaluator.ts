@@ -43,13 +43,34 @@ export function evalExpr(
     case "BooleanLiteral": return node.value;
     case "NullLiteral": return null;
 
-    case "ArrayExpression":
-      return node.elements.map(el => next(el));
+    case "ArrayExpression": {
+      const result: unknown[] = [];
+      for (const el of node.elements) {
+        if (el.type === "SpreadElement") {
+          const val = next(el.argument);
+          if (val === null) throw new XprError(`Cannot spread null`, el.position);
+          if (typeof val === "string") throw new XprError(`Cannot spread string into array`, el.position);
+          if (!Array.isArray(val)) throw new XprError(`Cannot spread non-array into array`, el.position);
+          result.push(...val);
+        } else {
+          result.push(next(el));
+        }
+      }
+      return result;
+    }
 
     case "ObjectExpression": {
       const obj: Record<string, unknown> = {};
       for (const prop of node.properties) {
-        obj[prop.key] = next(prop.value);
+        if (prop.type === "SpreadProperty") {
+          const val = next(prop.argument);
+          if (val === null) throw new XprError(`Cannot spread null`, prop.position);
+          if (Array.isArray(val)) throw new XprError(`Cannot spread array into object`, prop.position);
+          if (typeof val !== "object") throw new XprError(`Cannot spread non-object`, prop.position);
+          Object.assign(obj, val as Record<string, unknown>);
+        } else {
+          obj[prop.key] = next(prop.value);
+        }
       }
       return obj;
     }
@@ -212,6 +233,9 @@ export function evalExpr(
           return GLOBAL_FUNCTIONS[name](...args);
         }
         if (fns.has(name)) return fns.get(name)!(...args);
+        if (name in ctx && typeof ctx[name] === "function") {
+          return (ctx[name] as (...a: unknown[]) => unknown)(...args);
+        }
         throw new XprError(`Unknown function '${name}'`, pos);
       }
 
@@ -270,8 +294,14 @@ export function evalExpr(
       return result;
     }
 
+    case "LetExpression": {
+      const value = next(node.value);
+      const childCtx: Context = { ...ctx, [node.name]: value };
+      return evalExpr(node.body, childCtx, fns, depth + 1, startTime);
+    }
+
     case "SpreadElement":
-      throw new XprError(`Spread operator not supported in v0.1`, node.position);
+      throw new XprError(`Spread element used outside array context`, node.position);
 
     default: {
       const _exhaustive: never = node;
