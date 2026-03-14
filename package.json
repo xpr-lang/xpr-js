@@ -1,5 +1,6 @@
 {
   "name": "@xpr-lang/xpr",
+  "description": "Sandboxed cross-language expression language for data pipeline transforms",
   "version": "0.2.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -19,5 +20,13 @@
   "devDependencies": {
     "typescript": "^5.0.0",
     "yaml": "^2.0.0"
-  }
+  },
+  "author": "XPR Lang",
+  "homepage": "https://github.com/xpr-lang/xpr-js",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xpr-lang/xpr-js.git"
+  },
+  "keywords": ["expression", "language", "sandbox", "transform", "pipeline", "xpr"]
 }
