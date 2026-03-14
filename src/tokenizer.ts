@@ -43,6 +43,7 @@ export enum TokenType {
   RightBracket = "RightBracket",
   LeftBrace = "LeftBrace",
   RightBrace = "RightBrace",
+  Regex = "Regex",
   EOF = "EOF",
 }
 
@@ -69,9 +70,21 @@ function processEscape(ch: string): string {
   }
 }
 
+const REGEX_AFTER: Set<TokenType> = new Set([
+  TokenType.Equal, TokenType.EqualEqual, TokenType.BangEqual,
+  TokenType.LeftParen, TokenType.LeftBracket, TokenType.LeftBrace,
+  TokenType.Comma, TokenType.Semicolon, TokenType.Question, TokenType.Colon,
+  TokenType.PipeGreater, TokenType.Arrow, TokenType.AmpAmp, TokenType.PipePipe,
+  TokenType.QuestionQuestion, TokenType.Bang, TokenType.Plus, TokenType.Minus,
+  TokenType.Star, TokenType.Slash, TokenType.Percent, TokenType.StarStar,
+  TokenType.Less, TokenType.Greater, TokenType.LessEqual, TokenType.GreaterEqual,
+  TokenType.DotDotDot, TokenType.Let,
+]);
+
 export function tokenize(input: string): Token[] {
   const tokens: Token[] = [];
   let pos = 0;
+  let lastType: TokenType | null = null;
 
   function peek(offset = 0): string {
     return input[pos + offset] ?? "";
@@ -154,20 +167,45 @@ export function tokenize(input: string): Token[] {
     let depth = 1;
     while (pos < input.length && depth > 0) {
       const ch = peek();
-      if (ch === "{") { depth++; advance(); segTokens.push(tok(TokenType.LeftBrace, "{", pos - 1)); continue; }
+      if (ch === "{") { depth++; advance(); const t = tok(TokenType.LeftBrace, "{", pos - 1); segTokens.push(t); lastType = t.type; continue; }
       if (ch === "}") {
         depth--;
         if (depth === 0) { advance(); break; }
         advance();
-        segTokens.push(tok(TokenType.RightBrace, "}", pos - 1));
+        const t = tok(TokenType.RightBrace, "}", pos - 1);
+        segTokens.push(t);
+        lastType = t.type;
         continue;
       }
       const saved = pos;
       const t = nextToken();
-      if (t !== null) segTokens.push(t);
+      if (t !== null) { segTokens.push(t); lastType = t.type; }
       else if (pos === saved) { advance(); }
     }
     return segTokens;
+  }
+
+  function readRegex(start: number): Token {
+    let pattern = "";
+    let inClass = false;
+    while (pos < input.length) {
+      const ch = advance();
+      if (ch === "\n") throw new XprError(`Unterminated regex literal at position ${start}`, start);
+      if (ch === "\\") {
+        const esc = advance();
+        pattern += "\\" + esc;
+        continue;
+      }
+      if (ch === "[") { inClass = true; pattern += ch; continue; }
+      if (ch === "]") { inClass = false; pattern += ch; continue; }
+      if (ch === "/" && !inClass) {
+        let flags = "";
+        while (pos < input.length && /[imsgu]/.test(peek())) flags += advance();
+        return tok(TokenType.Regex, pattern + "/" + flags, start);
+      }
+      pattern += ch;
+    }
+    throw new XprError(`Unterminated regex literal at position ${start}`, start);
   }
 
   function nextToken(): Token | null {
@@ -231,7 +269,10 @@ export function tokenize(input: string): Token[] {
       case "+": return tok(TokenType.Plus, "+", start);
       case "-": return tok(TokenType.Minus, "-", start);
       case "*": return tok(TokenType.Star, "*", start);
-      case "/": return tok(TokenType.Slash, "/", start);
+      case "/": {
+        if (lastType === null || REGEX_AFTER.has(lastType)) return readRegex(start);
+        return tok(TokenType.Slash, "/", start);
+      }
       case "%": return tok(TokenType.Percent, "%", start);
       case "!": return tok(TokenType.Bang, "!", start);
       case "<": return tok(TokenType.Less, "<", start);
@@ -256,7 +297,10 @@ export function tokenize(input: string): Token[] {
     while (pos < input.length && /\s/.test(peek())) advance();
     if (pos >= input.length) break;
     const t = nextToken();
-    if (t !== null) tokens.push(t);
+    if (t !== null) {
+      tokens.push(t);
+      lastType = t.type;
+    }
   }
 
   tokens.push(tok(TokenType.EOF, "", pos));

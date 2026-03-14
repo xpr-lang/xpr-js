@@ -6,6 +6,8 @@ import type {
   BinaryExpression, BinaryOp, LogicalExpression, LogicalOp, UnaryExpression, UnaryOp,
   ConditionalExpression, ArrowFunction, CallExpression, TemplateLiteral,
   PipeExpression, Property, SpreadProperty, SpreadElement, LetExpression,
+  ObjectPattern, ArrayPattern, PatternProperty, ArrayPatternElement, BindingTarget, DestructurePattern,
+  RegexLiteral,
 } from "./types.js";
 
 const BP_PIPE = 10;
@@ -79,6 +81,13 @@ class Parser {
       case TokenType.Null:
         return { type: "NullLiteral", position: pos } as NullLiteral;
 
+      case TokenType.Regex: {
+        const slashIdx = token.value.lastIndexOf("/");
+        const pattern = token.value.slice(0, slashIdx);
+        const flags = token.value.slice(slashIdx + 1);
+        return { type: "RegexLiteral", pattern, flags, position: pos } as RegexLiteral;
+      }
+
       case TokenType.TemplateLiteral:
         return { type: "TemplateLiteral", quasis: [token.value], expressions: [], position: pos } as TemplateLiteral;
 
@@ -117,15 +126,28 @@ class Parser {
           const body = this.expression(0);
           return { type: "ArrowFunction", params: [], body, position: pos } as ArrowFunction;
         }
+        if (this.peek().type === TokenType.LeftBrace || this.peek().type === TokenType.LeftBracket) {
+          const params = this.parseArrowParamList();
+          this.expect(TokenType.RightParen);
+          this.expect(TokenType.Arrow);
+          const body = this.expression(0);
+          return { type: "ArrowFunction", params, body, position: pos } as ArrowFunction;
+        }
         const first = this.expression(0);
         if (this.peek().type === TokenType.Comma) {
-          const params: string[] = [];
+          const params: BindingTarget[] = [];
           if (first.type !== "Identifier") throw new XprError(`Arrow function params must be identifiers at position ${pos}`, pos);
           params.push(first.name);
           while (this.peek().type === TokenType.Comma) {
             this.advance();
-            const p = this.expect(TokenType.Identifier);
-            params.push(p.value);
+            if (this.peek().type === TokenType.LeftBrace) {
+              params.push(this.parseObjectPattern());
+            } else if (this.peek().type === TokenType.LeftBracket) {
+              params.push(this.parseArrayPattern());
+            } else {
+              const p = this.expect(TokenType.Identifier);
+              params.push(p.value);
+            }
           }
           this.expect(TokenType.RightParen);
           this.expect(TokenType.Arrow);
@@ -142,7 +164,14 @@ class Parser {
       }
 
       case TokenType.Let: {
-        const nameTok = this.expect(TokenType.Identifier);
+        let name: BindingTarget;
+        if (this.peek().type === TokenType.LeftBrace) {
+          name = this.parseObjectPattern();
+        } else if (this.peek().type === TokenType.LeftBracket) {
+          name = this.parseArrayPattern();
+        } else {
+          name = this.expect(TokenType.Identifier).value;
+        }
         this.expect(TokenType.Equal);
         const value = this.expression(0);
         const semi = this.peek();
@@ -154,7 +183,7 @@ class Parser {
           throw new XprError(`Expected expression after ';' in let binding`, semi.position);
         }
         const body = this.expression(0);
-        return { type: "LetExpression", name: nameTok.value, value, body, position: pos } as LetExpression;
+        return { type: "LetExpression", name, value, body, position: pos } as LetExpression;
       }
 
       case TokenType.LeftBracket: {
@@ -313,6 +342,86 @@ class Parser {
       default:
         throw new XprError(`Unexpected infix token ${token.type} at position ${pos}`, pos);
     }
+  }
+
+  private parseBindingTarget(): BindingTarget {
+    if (this.peek().type === TokenType.LeftBrace) return this.parseObjectPattern();
+    if (this.peek().type === TokenType.LeftBracket) return this.parseArrayPattern();
+    return this.expect(TokenType.Identifier).value;
+  }
+
+  private parseObjectPattern(): ObjectPattern {
+    const pos = this.peek().position;
+    this.expect(TokenType.LeftBrace);
+    const properties: PatternProperty[] = [];
+    const seen = new Set<string>();
+    while (this.peek().type !== TokenType.RightBrace && this.peek().type !== TokenType.EOF) {
+      const propPos = this.peek().position;
+      if (this.peek().type === TokenType.DotDotDot) {
+        this.advance();
+        const restId = this.expect(TokenType.Identifier).value;
+        properties.push({ key: restId, value: restId, defaultValue: null, shorthand: true, rest: true, position: propPos });
+        break;
+      }
+      const keyTok = this.peek();
+      let key: string;
+      if (keyTok.type === TokenType.Identifier || keyTok.type === TokenType.String) {
+        key = this.advance().value;
+      } else {
+        throw new XprError(`Expected property key at position ${keyTok.position}`, keyTok.position);
+      }
+      if (this.peek().type === TokenType.Colon) {
+        this.advance();
+        const value = this.parseBindingTarget();
+        let defaultValue: Expression | null = null;
+        if (this.peek().type === TokenType.Equal) { this.advance(); defaultValue = this.expression(0); }
+        properties.push({ key, value, defaultValue, shorthand: false, rest: false, position: propPos });
+      } else if (this.peek().type === TokenType.Equal) {
+        this.advance();
+        const defaultValue = this.expression(0);
+        if (seen.has(key)) throw new XprError(`duplicate binding '${key}'`, propPos);
+        seen.add(key);
+        properties.push({ key, value: key, defaultValue, shorthand: true, rest: false, position: propPos });
+      } else {
+        if (seen.has(key)) throw new XprError(`duplicate binding '${key}'`, propPos);
+        seen.add(key);
+        properties.push({ key, value: key, defaultValue: null, shorthand: true, rest: false, position: propPos });
+      }
+      if (this.peek().type === TokenType.Comma) this.advance(); else break;
+    }
+    this.expect(TokenType.RightBrace);
+    return { type: "ObjectPattern", properties, position: pos };
+  }
+
+  private parseArrayPattern(): ArrayPattern {
+    const pos = this.peek().position;
+    this.expect(TokenType.LeftBracket);
+    const elements: ArrayPatternElement[] = [];
+    while (this.peek().type !== TokenType.RightBracket && this.peek().type !== TokenType.EOF) {
+      const elPos = this.peek().position;
+      if (this.peek().type === TokenType.DotDotDot) {
+        this.advance();
+        const restId = this.expect(TokenType.Identifier).value;
+        elements.push({ element: restId, defaultValue: null, rest: true, position: elPos });
+        break;
+      }
+      const element = this.parseBindingTarget();
+      let defaultValue: Expression | null = null;
+      if (this.peek().type === TokenType.Equal) { this.advance(); defaultValue = this.expression(0); }
+      elements.push({ element, defaultValue, rest: false, position: elPos });
+      if (this.peek().type === TokenType.Comma) this.advance(); else break;
+    }
+    this.expect(TokenType.RightBracket);
+    return { type: "ArrayPattern", elements, position: pos };
+  }
+
+  private parseArrowParamList(): BindingTarget[] {
+    const params: BindingTarget[] = [];
+    while (this.peek().type !== TokenType.RightParen && this.peek().type !== TokenType.EOF) {
+      params.push(this.parseBindingTarget());
+      if (this.peek().type === TokenType.Comma) this.advance(); else break;
+    }
+    return params;
   }
 
   private parseArgList(): Expression[] {

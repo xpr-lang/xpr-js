@@ -3,6 +3,29 @@ import { XprError } from "./errors.js";
 type XprValue = unknown;
 type XprFn = (...args: XprValue[]) => XprValue;
 
+export interface XprRegex {
+  __xpr_regex: true;
+  pattern: string;
+  flags: string;
+  compiled: RegExp;
+}
+
+export function isRegex(v: XprValue): v is XprRegex {
+  return v !== null && typeof v === "object" && (v as XprRegex).__xpr_regex === true;
+}
+
+export function callRegexMethod(re: XprRegex, method: string, args: XprValue[], pos: number): XprValue {
+  switch (method) {
+    case "test": {
+      if (args.length !== 1) throw new XprError(`Wrong number of arguments for 'test': expected 1, got ${args.length}`, pos);
+      if (typeof args[0] !== "string") throw new XprError(`Type error: test expects string`, pos);
+      return re.compiled.test(args[0] as string);
+    }
+    default:
+      throw new XprError(`Type error: regex has no method '${method}'`, pos);
+  }
+}
+
 function assertString(v: XprValue, method: string, pos: number): string {
   if (typeof v !== "string") throw new XprError(`Type error: cannot call method '${method}' on ${xprType(v)}`, pos);
   return v;
@@ -29,6 +52,7 @@ function extractInlineFlags(pattern: string): { src: string; flags: string } {
 export function xprType(v: XprValue): string {
   if (v === null) return "null";
   if (Array.isArray(v)) return "array";
+  if (isRegex(v)) return "regex";
   return typeof v;
 }
 
@@ -78,8 +102,21 @@ export function callStringMethod(obj: XprValue, method: string, args: XprValue[]
     }
     case "replace": {
       if (args.length !== 2) throw new XprError(`Wrong number of arguments for 'replace': expected 2, got ${args.length}`, pos);
-      if (typeof args[0] !== "string" || typeof args[1] !== "string") throw new XprError(`Type error: replace expects string arguments`, pos);
+      if (typeof args[1] !== "string") throw new XprError(`Type error: replace replacement must be string`, pos);
+      if (isRegex(args[0])) {
+        const re = args[0] as XprRegex;
+        const globalRe = new RegExp(re.pattern, re.flags.includes("g") ? re.flags : re.flags + "g");
+        return s.replace(globalRe, args[1] as string);
+      }
+      if (typeof args[0] !== "string") throw new XprError(`Type error: replace expects string or regex as first argument`, pos);
       return s.split(args[0] as string).join(args[1] as string);
+    }
+    case "match": {
+      if (args.length !== 1) throw new XprError(`Wrong number of arguments for 'match': expected 1, got ${args.length}`, pos);
+      if (!isRegex(args[0])) throw new XprError(`Type error: match expects regex argument`, pos);
+      const re = args[0] as XprRegex;
+      const m = s.match(re.compiled);
+      return m ? m[0] : null;
     }
     case "slice": {
       if (args.length < 1 || args.length > 2) throw new XprError(`Wrong number of arguments for 'slice': expected 1-2, got ${args.length}`, pos);
@@ -343,6 +380,7 @@ export const GLOBAL_FUNCTIONS: Record<string, XprFn> = {
     if (typeof v === "boolean") return v ? "true" : "false";
     if (typeof v === "number") return String(v);
     if (typeof v === "string") return v;
+    if (isRegex(v)) return `/${(v as XprRegex).pattern}/${(v as XprRegex).flags}`;
     return JSON.stringify(v);
   },
   bool: (v) => isTruthy(v),

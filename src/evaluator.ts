@@ -1,12 +1,10 @@
 import { XprError } from "./errors.js";
-import type { Expression } from "./types.js";
+import type { Expression, SpreadElement, ObjectPattern, ArrayPattern, BindingTarget } from "./types.js";
 import {
   xprType, isTruthy,
-  callStringMethod, callArrayMethod, callObjectMethod,
-  GLOBAL_FUNCTIONS,
+  callStringMethod, callArrayMethod, callObjectMethod, callRegexMethod,
+  GLOBAL_FUNCTIONS, isRegex, type XprRegex,
 } from "./functions.js";
-
-import type { SpreadElement } from "./types.js";
 
 function expandArgs(rawArgs: Expression[], next: (e: Expression) => unknown): unknown[] {
   const result: unknown[] = [];
@@ -21,6 +19,53 @@ function expandArgs(rawArgs: Expression[], next: (e: Expression) => unknown): un
     }
   }
   return result;
+}
+
+function destructureInto(
+  target: BindingTarget,
+  value: unknown,
+  ctx: Context,
+  next: (e: import("./types.js").Expression) => unknown
+): void {
+  if (typeof target === "string") {
+    ctx[target] = value;
+    return;
+  }
+  if (target.type === "ObjectPattern") {
+    if (value === null) throw new XprError(`Cannot destructure null`);
+    const obj = (typeof value === "object" && !Array.isArray(value) ? value : {}) as Record<string, unknown>;
+    const usedKeys = new Set<string>();
+    for (const prop of target.properties) {
+      if (prop.rest) {
+        const rest: Record<string, unknown> = {};
+        for (const k of Object.keys(obj)) {
+          if (!usedKeys.has(k)) rest[k] = obj[k];
+        }
+        ctx[prop.value as string] = rest;
+      } else {
+        usedKeys.add(prop.key);
+        let val: unknown = obj[prop.key] ?? null;
+        if (val === null && prop.defaultValue !== null) val = next(prop.defaultValue!);
+        destructureInto(prop.value, val, ctx, next);
+      }
+    }
+  } else {
+    if (value === null) throw new XprError(`Cannot destructure null`);
+    if (!Array.isArray(value)) throw new XprError(`Cannot destructure non-array as array`);
+    if (typeof value === "string") throw new XprError(`Cannot destructure string as array`);
+    const arr = value as unknown[];
+    let i = 0;
+    for (const el of target.elements) {
+      if (el.rest) {
+        ctx[el.element as string] = arr.slice(i);
+        break;
+      }
+      let val: unknown = arr[i] ?? null;
+      if (val === null && el.defaultValue !== null) val = next(el.defaultValue!);
+      destructureInto(el.element, val, ctx, next);
+      i++;
+    }
+  }
 }
 
 const GLOBAL_FUNCTION_ARITY: Record<string, number> = {
@@ -136,8 +181,18 @@ export function evalExpr(
       const right = next(node.right);
       const op = node.op;
 
-      if (op === "==" ) return left === right;
-      if (op === "!=" ) return left !== right;
+      if (op === "==" ) {
+        if (isRegex(left) && isRegex(right)) return (left as XprRegex).pattern === (right as XprRegex).pattern && (left as XprRegex).flags === (right as XprRegex).flags;
+        return left === right;
+      }
+      if (op === "!=" ) {
+        if (isRegex(left) && isRegex(right)) return (left as XprRegex).pattern !== (right as XprRegex).pattern || (left as XprRegex).flags !== (right as XprRegex).flags;
+        return left !== right;
+      }
+
+      if (isRegex(left) || isRegex(right)) {
+        throw new XprError(`Type error: cannot use operator '${op}' with regex`, node.position);
+      }
 
       if (op === "+" ) {
         if (typeof left === "string" && typeof right === "string") return left + right;
@@ -207,7 +262,14 @@ export function evalExpr(
       return (...args: unknown[]) => {
         const childCtx: Context = { ...ctx };
         for (let i = 0; i < params.length; i++) {
-          childCtx[params[i]] = args[i] ?? null;
+          const param = params[i];
+          const arg = args[i] ?? null;
+          if (typeof param === "string") {
+            childCtx[param] = arg;
+          } else {
+            const innerNext = (e: Expression) => evalExpr(e, childCtx, fns, depth + 1, startTime);
+            destructureInto(param, arg, childCtx, innerNext);
+          }
         }
         return evalExpr(body, childCtx, fns, depth + 1, startTime);
       };
@@ -234,6 +296,7 @@ export function evalExpr(
 
         if (typeof obj === "string") return callStringMethod(obj, methodName, args, pos);
         if (Array.isArray(obj)) return callArrayMethod(obj, methodName, args, pos);
+        if (isRegex(obj)) return callRegexMethod(obj as XprRegex, methodName, args, pos);
         if (obj !== null && typeof obj === "object") return callObjectMethod(obj, methodName, args, pos);
 
         throw new XprError(`Type error: cannot call method '${methodName}' on ${xprType(obj)}`, pos);
@@ -298,6 +361,8 @@ export function evalExpr(
         return dispatchMethodOrError(left, name, [], node.position);
       }
 
+      const rhsVal = next(right);
+      if (typeof rhsVal === "function") return (rhsVal as (...a: unknown[]) => unknown)(left);
       throw new XprError(`Pipe RHS must be callable`, node.position);
     }
 
@@ -313,8 +378,14 @@ export function evalExpr(
 
     case "LetExpression": {
       const value = next(node.value);
-      const childCtx: Context = { ...ctx, [node.name]: value };
+      const childCtx: Context = { ...ctx };
+      destructureInto(node.name, value, childCtx, next);
       return evalExpr(node.body, childCtx, fns, depth + 1, startTime);
+    }
+
+    case "RegexLiteral": {
+      const compiled = new RegExp(node.pattern, node.flags);
+      return { __xpr_regex: true, pattern: node.pattern, flags: node.flags, compiled } as XprRegex;
     }
 
     case "SpreadElement":

@@ -91,7 +91,7 @@ export interface PipeExpression {
 // ── Bindings (1) ──────────────────────────────
 export interface LetExpression {
   type: "LetExpression";
-  name: string;
+  name: string | DestructurePattern;
   value: Expression;
   body: Expression;
   position: Position;
@@ -101,6 +101,46 @@ export interface LetExpression {
 export interface SpreadElement {
   type: "SpreadElement";
   argument: Expression;
+  position: Position;
+}
+
+// ── Destructuring Patterns (4) ────────────────
+export interface PatternProperty {
+  key: string;
+  value: BindingTarget;
+  defaultValue: Expression | null;
+  shorthand: boolean;
+  rest: boolean;
+  position: Position;
+}
+
+export interface ArrayPatternElement {
+  element: BindingTarget;
+  defaultValue: Expression | null;
+  rest: boolean;
+  position: Position;
+}
+
+export interface ObjectPattern {
+  type: "ObjectPattern";
+  properties: PatternProperty[];
+  position: Position;
+}
+
+export interface ArrayPattern {
+  type: "ArrayPattern";
+  elements: ArrayPatternElement[];
+  position: Position;
+}
+
+export type DestructurePattern = ObjectPattern | ArrayPattern;
+export type BindingTarget = string | DestructurePattern;
+
+// ── Regex Literal (1) ─────────────────────────
+export interface RegexLiteral {
+  type: "RegexLiteral";
+  pattern: string;
+  flags: string;
   position: Position;
 }
 
@@ -137,4 +177,5 @@ export type Expression =
   | TemplateLiteral
   | PipeExpression
   | SpreadElement
-  | LetExpression;
+  | LetExpression
+  | RegexLiteral;

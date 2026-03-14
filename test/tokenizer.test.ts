@@ -166,9 +166,14 @@ describe("tokenizer", () => {
   });
 
   it("all single-char operators", () => {
-    const tokens = tokenize("+ - * / % ! < > ? : . , ( ) [ ] { }");
+    const tokens = tokenize("a / b");
+    expect(types(tokens)).toEqual([TokenType.Identifier, TokenType.Slash, TokenType.Identifier, TokenType.EOF]);
+  });
+
+  it("all single-char operators non-slash", () => {
+    const tokens = tokenize("+ - * % ! < > ? : . , ( ) [ ] { }");
     expect(types(tokens)).toEqual([
-      TokenType.Plus, TokenType.Minus, TokenType.Star, TokenType.Slash, TokenType.Percent,
+      TokenType.Plus, TokenType.Minus, TokenType.Star, TokenType.Percent,
       TokenType.Bang, TokenType.Less, TokenType.Greater, TokenType.Question, TokenType.Colon,
       TokenType.Dot, TokenType.Comma,
       TokenType.LeftParen, TokenType.RightParen,
