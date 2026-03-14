@@ -20,6 +20,12 @@ function assertObject(v: XprValue, method: string, pos: number): Record<string, 
   return v as Record<string, XprValue>;
 }
 
+function extractInlineFlags(pattern: string): { src: string; flags: string } {
+  const m = pattern.match(/^\(\?([imsu]+)\)(.*)/s);
+  if (m) return { src: m[2], flags: m[1] };
+  return { src: pattern, flags: "" };
+}
+
 export function xprType(v: XprValue): string {
   if (v === null) return "null";
   if (Array.isArray(v)) return "array";
@@ -303,13 +309,15 @@ export const GLOBAL_FUNCTIONS: Record<string, XprFn> = {
     if (typeof n !== "number") throw new XprError(`Type error: abs expects number`);
     return Math.abs(n);
   },
-  min: (a, b) => {
-    if (typeof a !== "number" || typeof b !== "number") throw new XprError(`Type error: min expects numbers`);
-    return Math.min(a, b);
+  min: (...args: XprValue[]) => {
+    if (args.length < 2) throw new XprError(`Wrong number of arguments for 'min': expected at least 2, got ${args.length}`);
+    for (const a of args) if (typeof a !== "number") throw new XprError(`Type error: min expects numbers`);
+    return Math.min(...(args as number[]));
   },
-  max: (a, b) => {
-    if (typeof a !== "number" || typeof b !== "number") throw new XprError(`Type error: max expects numbers`);
-    return Math.max(a, b);
+  max: (...args: XprValue[]) => {
+    if (args.length < 2) throw new XprError(`Wrong number of arguments for 'max': expected at least 2, got ${args.length}`);
+    for (const a of args) if (typeof a !== "number") throw new XprError(`Type error: max expects numbers`);
+    return Math.max(...(args as number[]));
   },
   type: (v) => xprType(v),
   int: (v) => {
@@ -363,5 +371,172 @@ export const GLOBAL_FUNCTIONS: Record<string, XprFn> = {
       for (let i = start; i > end; i += step) result.push(i);
     }
     return result;
+  },
+
+  // ── Date/Time Functions (v0.3) ──────────────────────────────────────────
+  now: () => Date.now(),
+
+  parseDate: (...args: XprValue[]) => {
+    const [str, fmt] = args;
+    if (typeof str !== "string") throw new XprError(`Type error: parseDate expects string`);
+    if (fmt === undefined || fmt === null) {
+      const ms = Date.parse(str as string);
+      if (isNaN(ms)) throw new XprError(`invalid date string: "${str}"`);
+      return ms;
+    }
+    if (typeof fmt !== "string") throw new XprError(`Type error: parseDate format must be string`);
+    const tokenRegex = /yyyy|MM|dd|HH|mm|ss|SSS/g;
+    const tokenNames: string[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = tokenRegex.exec(fmt as string)) !== null) tokenNames.push(m[0]);
+    const escaped = (fmt as string).replace(/[.+?^${}()|[\]\\]/g, "\\$&");
+    const regexStr = "^" + escaped
+      .replace(/yyyy/g, "(\\d{4})")
+      .replace(/MM/g, "(\\d{2})")
+      .replace(/dd/g, "(\\d{2})")
+      .replace(/HH/g, "(\\d{2})")
+      .replace(/mm/g, "(\\d{2})")
+      .replace(/ss/g, "(\\d{2})")
+      .replace(/SSS/g, "(\\d{3})") + "$";
+    const match = (str as string).match(new RegExp(regexStr));
+    if (!match) throw new XprError(`invalid date string: "${str}" does not match format "${fmt}"`);
+    let year = 1970, month = 1, day = 1, hour = 0, minute = 0, second = 0, ms = 0;
+    tokenNames.forEach((t, i) => {
+      const v = parseInt(match[i + 1], 10);
+      if (t === "yyyy") year = v;
+      else if (t === "MM") month = v;
+      else if (t === "dd") day = v;
+      else if (t === "HH") hour = v;
+      else if (t === "mm") minute = v;
+      else if (t === "ss") second = v;
+      else if (t === "SSS") ms = v;
+    });
+    return Date.UTC(year, month - 1, day, hour, minute, second, ms);
+  },
+
+  formatDate: (date: XprValue, fmt: XprValue) => {
+    if (typeof date !== "number") throw new XprError(`Type error: formatDate expects number (epoch ms)`);
+    if (typeof fmt !== "string") throw new XprError(`Type error: formatDate format must be string`);
+    const d = new Date(date as number);
+    return (fmt as string)
+      .replace(/yyyy/g, String(d.getUTCFullYear()).padStart(4, "0"))
+      .replace(/MM/g, String(d.getUTCMonth() + 1).padStart(2, "0"))
+      .replace(/dd/g, String(d.getUTCDate()).padStart(2, "0"))
+      .replace(/HH/g, String(d.getUTCHours()).padStart(2, "0"))
+      .replace(/mm/g, String(d.getUTCMinutes()).padStart(2, "0"))
+      .replace(/ss/g, String(d.getUTCSeconds()).padStart(2, "0"))
+      .replace(/SSS/g, String(d.getUTCMilliseconds()).padStart(3, "0"));
+  },
+
+  year: (date: XprValue) => {
+    if (typeof date !== "number") throw new XprError(`Type error: year expects number (epoch ms)`);
+    return new Date(date as number).getUTCFullYear();
+  },
+  month: (date: XprValue) => {
+    if (typeof date !== "number") throw new XprError(`Type error: month expects number (epoch ms)`);
+    return new Date(date as number).getUTCMonth() + 1;
+  },
+  day: (date: XprValue) => {
+    if (typeof date !== "number") throw new XprError(`Type error: day expects number (epoch ms)`);
+    return new Date(date as number).getUTCDate();
+  },
+  hour: (date: XprValue) => {
+    if (typeof date !== "number") throw new XprError(`Type error: hour expects number (epoch ms)`);
+    return new Date(date as number).getUTCHours();
+  },
+  minute: (date: XprValue) => {
+    if (typeof date !== "number") throw new XprError(`Type error: minute expects number (epoch ms)`);
+    return new Date(date as number).getUTCMinutes();
+  },
+  second: (date: XprValue) => {
+    if (typeof date !== "number") throw new XprError(`Type error: second expects number (epoch ms)`);
+    return new Date(date as number).getUTCSeconds();
+  },
+  millisecond: (date: XprValue) => {
+    if (typeof date !== "number") throw new XprError(`Type error: millisecond expects number (epoch ms)`);
+    return new Date(date as number).getUTCMilliseconds();
+  },
+
+  dateAdd: (date: XprValue, amount: XprValue, unit: XprValue) => {
+    if (typeof date !== "number") throw new XprError(`Type error: dateAdd expects number (epoch ms)`);
+    if (typeof amount !== "number") throw new XprError(`Type error: dateAdd amount must be number`);
+    if (typeof unit !== "string") throw new XprError(`Type error: dateAdd unit must be string`);
+    const amt = Math.trunc(amount as number);
+    const d = new Date(date as number);
+    switch (unit as string) {
+      case "years":        d.setUTCFullYear(d.getUTCFullYear() + amt); break;
+      case "months":       d.setUTCMonth(d.getUTCMonth() + amt); break;
+      case "days":         d.setUTCDate(d.getUTCDate() + amt); break;
+      case "hours":        d.setUTCHours(d.getUTCHours() + amt); break;
+      case "minutes":      d.setUTCMinutes(d.getUTCMinutes() + amt); break;
+      case "seconds":      d.setUTCSeconds(d.getUTCSeconds() + amt); break;
+      case "milliseconds": return (date as number) + amt;
+      default: throw new XprError(`invalid unit "${unit}" for dateAdd`);
+    }
+    return d.getTime();
+  },
+
+  dateDiff: (date1: XprValue, date2: XprValue, unit: XprValue) => {
+    if (typeof date1 !== "number") throw new XprError(`Type error: dateDiff expects number (epoch ms)`);
+    if (typeof date2 !== "number") throw new XprError(`Type error: dateDiff expects number (epoch ms)`);
+    if (typeof unit !== "string") throw new XprError(`Type error: dateDiff unit must be string`);
+    const diff = (date2 as number) - (date1 as number);
+    switch (unit as string) {
+      case "milliseconds": return diff;
+      case "seconds":      return Math.trunc(diff / 1000);
+      case "minutes":      return Math.trunc(diff / 60000);
+      case "hours":        return Math.trunc(diff / 3600000);
+      case "days":         return Math.trunc(diff / 86400000);
+      case "months": {
+        const d1 = new Date(date1 as number);
+        const d2 = new Date(date2 as number);
+        return (d2.getUTCFullYear() - d1.getUTCFullYear()) * 12 + (d2.getUTCMonth() - d1.getUTCMonth());
+      }
+      case "years": {
+        const d1 = new Date(date1 as number);
+        const d2 = new Date(date2 as number);
+        return d2.getUTCFullYear() - d1.getUTCFullYear();
+      }
+      default: throw new XprError(`invalid unit "${unit}" for dateDiff`);
+    }
+  },
+
+  // ── Regex Functions (v0.3) ────────────────────────────────────────────────
+  matches: (str: XprValue, pattern: XprValue) => {
+    if (typeof str !== "string") throw new XprError(`Type error: matches expects string`);
+    if (typeof pattern !== "string") throw new XprError(`Type error: matches pattern must be string`);
+    try {
+      const { src, flags } = extractInlineFlags(pattern as string);
+      return new RegExp(src, flags).test(str as string);
+    } catch (e) { throw new XprError(`invalid regex pattern: ${(e as Error).message}`); }
+  },
+
+  match: (str: XprValue, pattern: XprValue) => {
+    if (typeof str !== "string") throw new XprError(`Type error: match expects string`);
+    if (typeof pattern !== "string") throw new XprError(`Type error: match pattern must be string`);
+    try {
+      const { src, flags } = extractInlineFlags(pattern as string);
+      const m = (str as string).match(new RegExp(src, flags));
+      return m ? m[0] : null;
+    } catch (e) { throw new XprError(`invalid regex pattern: ${(e as Error).message}`); }
+  },
+
+  matchAll: (str: XprValue, pattern: XprValue) => {
+    if (typeof str !== "string") throw new XprError(`Type error: matchAll expects string`);
+    if (typeof pattern !== "string") throw new XprError(`Type error: matchAll pattern must be string`);
+    try {
+      const { src, flags } = extractInlineFlags(pattern as string);
+      return [...(str as string).matchAll(new RegExp(src, flags + "g"))].map(m => m[0]);
+    } catch (e) { throw new XprError(`invalid regex pattern: ${(e as Error).message}`); }
+  },
+
+  replacePattern: (str: XprValue, pattern: XprValue, replacement: XprValue) => {
+    if (typeof str !== "string") throw new XprError(`Type error: replacePattern expects string`);
+    if (typeof pattern !== "string") throw new XprError(`Type error: replacePattern pattern must be string`);
+    if (typeof replacement !== "string") throw new XprError(`Type error: replacePattern replacement must be string`);
+    try {
+      const { src, flags } = extractInlineFlags(pattern as string);
+      return (str as string).replace(new RegExp(src, flags + "g"), replacement as string);
+    } catch (e) { throw new XprError(`invalid regex pattern: ${(e as Error).message}`); }
   },
 };

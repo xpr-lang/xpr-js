@@ -6,9 +6,25 @@ import {
   GLOBAL_FUNCTIONS,
 } from "./functions.js";
 
+import type { SpreadElement } from "./types.js";
+
+function expandArgs(rawArgs: Expression[], next: (e: Expression) => unknown): unknown[] {
+  const result: unknown[] = [];
+  for (const arg of rawArgs) {
+    if (arg.type === "SpreadElement") {
+      const val = next((arg as SpreadElement).argument);
+      if (val === null) throw new XprError(`Cannot spread null`);
+      if (!Array.isArray(val)) throw new XprError(`Cannot spread non-array`);
+      result.push(...(val as unknown[]));
+    } else {
+      result.push(next(arg));
+    }
+  }
+  return result;
+}
+
 const GLOBAL_FUNCTION_ARITY: Record<string, number> = {
   round: 1, floor: 1, ceil: 1, abs: 1,
-  min: 2, max: 2,
   type: 1, int: 1, float: 1, string: 1, bool: 1,
 };
 
@@ -92,8 +108,9 @@ export function evalExpr(
         const key = next(node.property as Expression);
         if (typeof key === "number") {
           if (!Array.isArray(obj)) throw new XprError(`Cannot index non-array with number`, node.position);
-          if (key < 0) throw new XprError(`negative indexing not supported`, node.position);
-          return (obj as unknown[])[key] ?? null;
+          let idx = Math.trunc(key);
+          if (idx < 0) idx = (obj as unknown[]).length + idx;
+          return (idx >= 0 && idx < (obj as unknown[]).length) ? ((obj as unknown[])[idx] ?? null) : null;
         }
         propName = String(key);
       } else {
@@ -213,7 +230,7 @@ export function evalExpr(
           throw new XprError(`Access denied: '${methodName}' is a restricted property`, pos);
         }
 
-        const args = node.arguments.map(a => next(a));
+        const args = expandArgs(node.arguments, next);
 
         if (typeof obj === "string") return callStringMethod(obj, methodName, args, pos);
         if (Array.isArray(obj)) return callArrayMethod(obj, methodName, args, pos);
@@ -224,7 +241,7 @@ export function evalExpr(
 
       if (node.callee.type === "Identifier") {
         const name = node.callee.name;
-        const args = node.arguments.map(a => next(a));
+        const args = expandArgs(node.arguments, next);
         if (GLOBAL_FUNCTIONS[name]) {
           const arity = GLOBAL_FUNCTION_ARITY[name];
           if (arity !== undefined && args.length !== arity) {
@@ -242,7 +259,7 @@ export function evalExpr(
       const callee = next(node.callee);
       if (node.optional && callee === null) return null;
 
-      const args = node.arguments.map(a => next(a));
+      const args = expandArgs(node.arguments, next);
 
       if (typeof callee === "function") {
         return (callee as (...a: unknown[]) => unknown)(...args);
