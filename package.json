@@ -1,7 +1,7 @@
 {
   "name": "@xpr-lang/xpr",
   "description": "Sandboxed cross-language expression language for data pipeline transforms",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
