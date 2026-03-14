@@ -5,7 +5,7 @@ import type {
   ArrayExpression, ObjectExpression, Identifier, MemberExpression,
   BinaryExpression, BinaryOp, LogicalExpression, LogicalOp, UnaryExpression, UnaryOp,
   ConditionalExpression, ArrowFunction, CallExpression, TemplateLiteral,
-  PipeExpression, Property, SpreadProperty, LetExpression,
+  PipeExpression, Property, SpreadProperty, SpreadElement, LetExpression,
 } from "./types.js";
 
 const BP_PIPE = 10;
@@ -318,7 +318,13 @@ class Parser {
   private parseArgList(): Expression[] {
     const args: Expression[] = [];
     while (this.peek().type !== TokenType.RightParen && this.peek().type !== TokenType.EOF) {
-      args.push(this.expression(0));
+      if (this.peek().type === TokenType.DotDotDot) {
+        const pos = this.peek().position;
+        this.advance(); // consume ...
+        args.push({ type: "SpreadElement", argument: this.expression(0), position: pos } as SpreadElement);
+      } else {
+        args.push(this.expression(0));
+      }
       if (this.peek().type === TokenType.Comma) this.advance();
       else break;
     }
